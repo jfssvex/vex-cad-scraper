@@ -1,0 +1,23 @@
+{
+  "name": "vex-cad-scraper",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "private": true,
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jfssvex/vex-cad-scraper.git"
+  },
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/jfssvex/vex-cad-scraper/issues"
+  },
+  "homepage": "https://github.com/jfssvex/vex-cad-scraper#readme",
+  "dependencies": {
+    "puppeteer": "^5.3.1"
+  }
+}
