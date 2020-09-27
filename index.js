@@ -1,31 +1,25 @@
+require("dotenv").config();
 const puppeteer = require("puppeteer");
-/**
- * Check if element is vitible
- * @param {puppeteer.Page} page Page to check element on
- * @param {string} cssSelector
- */
-const isElementClickable = async (page, cssSelector) => {
-  let clickable = true;
+const http = require("http");
+const fs = require("fs");
 
-  // If selector is gone, set clickable to false
-  await page
-    .waitForSelector(cssSelector, { visible: true, timeout: 2000 })
-    .catch(() => {
-      clickable = false;
-    });
-
-  // If button is disabled, set clickable to false
-  if (await page.$eval(cssSelector, (item) => item.disabled)) {
-    clickable = false;
+async function retry(promiseFactory, retryCount) {
+  try {
+    return await promiseFactory();
+  } catch (error) {
+    if (retryCount <= 0) {
+      throw error;
+    }
+    return await retry(promiseFactory, retryCount - 1);
   }
-  return clickable;
-};
+}
 
 (async () => {
   const browser = await puppeteer.launch({
     headless: false,
   });
   const page = await browser.newPage();
+  page.setDefaultNavigationTimeout(0);
 
   // Download V5 Parts
   await page.goto("https://www.vexrobotics.com/v5/products/view-all", {
@@ -34,17 +28,71 @@ const isElementClickable = async (page, cssSelector) => {
 
   // Close shipping notice modal
   await page.click("a.js-modal-close");
+
   // Load all the pages
-  let loadMoreSelector = "button.ais-infinite-hits--showmoreButton";
-  let loadMoreVisible = await isElementClickable(page, loadMoreSelector);
-  while (loadMoreVisible) {
-    await page.click(loadMoreSelector).catch((err) => {
-      console.error(err);
-    });
-    loadMoreVisible = await isElementClickable(page, loadMoreSelector);
+  const loadMoreSelector = "button.ais-infinite-hits--showmoreButton";
+  await page.waitForSelector(loadMoreSelector);
+  let disabled = await page.$eval(loadMoreSelector, (item) => item.disabled);
+
+  while (!disabled) {
+    await page
+      .click(loadMoreSelector, { waitUntil: "networkidle2" })
+      .catch(() => {});
+    await page.waitForTimeout(100);
+    await page
+      .waitForSelector(loadMoreSelector, { visible: true, timeout: 2000 })
+      .catch(() => {
+        page.reload();
+      });
+    disabled = await page.$eval(loadMoreSelector, (item) => item.disabled);
+    console.log(disabled);
   }
 
-  console.log(await page.$$eval(".result", results => results.map(result => result.href)));
+  // Store results
+  const resultLinks = await page.$$eval(".result", (results) =>
+    results.map((result) => result.href)
+  );
+
+  const cadFiles = {};
+  // Iterate through results
+  for (const link of resultLinks) {
+    console.log(`Loading ${link}...`);
+    await retry(
+      () =>
+        page.goto(link, {
+          waitUntil: "networkidle2",
+        }),
+      5
+    );
+
+    // Get Product Name
+    const pageTitle = await page.$eval("span.base", (text) => text.textContent);
+
+    const cadFileSelector = "#tab-label-cad-title";
+
+    let cadLinksExist = true;
+    // If selector is gone, set clickable to false
+    await page
+      .waitForSelector(cadFileSelector, { visible: true, timeout: 1000 })
+      .catch(() => {
+        cadLinksExist = false;
+      });
+
+    if (cadLinksExist) {
+      const cadDownloadActions = await page.$$eval(
+        "div.cad-actions",
+        (groups) =>
+          groups.map((group) => group.children.item(1).getAttribute("onclick"))
+      );
+      const urlRegex = /((\w+:\/\/)[-a-zA-Z0-9:@;?&=\/%\+\.\*!\(\),\$_\{\}\^~\[\]`#|]+)/;
+      const cadDownloadLinks = cadDownloadActions.map(
+        (action) => urlRegex.exec(action)[0]
+      );
+      console.log("Files found: ");
+      console.log(cadDownloadLinks);
+      cadFiles[pageTitle] = cadDownloadLinks;
+    }
+  }
 
   await browser.close();
 })();
